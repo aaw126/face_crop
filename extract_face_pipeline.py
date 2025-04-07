@@ -178,7 +178,7 @@ def detect_scenes(video_path, threshold=30):
 
 def process_single_video(input_video_path, output_dir, detector):
     # with semaphore:
-    video_name = os.path.splitext(os.path.basename(input_video_path))[0]  # 获取原视频名
+    video_name = os.path.splitext(os.path.basename(input_video_path))[0] 
     for i in range(10):
         if os.path.exists(os.path.join(output_dir, f"{video_name}_scene_{i}.mp4")):
             print(f"{video_name} has been processed")
