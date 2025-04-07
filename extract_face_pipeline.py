@@ -15,48 +15,29 @@ import shutil
 from multiprocessing import Process, Semaphore
 import argparse
 
-max_processes = 10 #进程数量
+max_processes = 10 
 semaphore = Semaphore(max_processes)
 
-
-
 def extract_image_region(img, x, y, x2, y2):
-    """
-    提取图像指定区域，越界部分自动补零
-    参数：
-        img_path: 图像路径或已加载的 OpenCV 图像数组
-        x, y: 左上角坐标（原点在左上角，向右为x轴正方向，向下为y轴正方向）
-        x2, y2: 右下角坐标
-    返回：
-        cropped: 截取区域（超出原图部分填充为黑色）
-    """
-    # 读取图像
-
-    # 获取图像尺寸
     h, w = img.shape[:2]
-    channels = 3 if len(img.shape) == 3 else 1  # 处理灰度/彩色图像
-
-    # 创建全零画布（支持多通道）
+    channels = 3 if len(img.shape) == 3 else 1 
+    
     result_h = max(y2 - y, 0)
     result_w = max(x2 - x, 0)
     canvas = np.zeros((result_h, result_w, channels), dtype=np.uint8) if channels > 1 \
         else np.zeros((result_h, result_w), dtype=np.uint8)
-
-    # 计算有效区域在原图中的坐标
+    
     x_start = max(x, 0)
     x_end = min(x2, w)
     y_start = max(y, 0)
     y_end = min(y2, h)
-
-    # 计算有效区域在画布中的坐标
+    
     canvas_x_start = x_start - x
     canvas_x_end = canvas_x_start + (x_end - x_start)
     canvas_y_start = y_start - y
     canvas_y_end = canvas_y_start + (y_end - y_start)
 
-    # 当存在有效区域时进行拷贝
     if (x_end > x_start) and (y_end > y_start):
-        # 处理单通道图像的特殊情况
         if channels == 1:
             valid_region = img[y_start:y_end, x_start:x_end]
             canvas[canvas_y_start:canvas_y_end, canvas_x_start:canvas_x_end] = valid_region
@@ -68,17 +49,6 @@ def extract_image_region(img, x, y, x2, y2):
 
 
 def interpolate_missing_frames(center_points, max_missing=5):
-    """ 对缺失的人脸检测帧进行插值，仅当连续缺失帧数 ≤ max_missing 时适用 """
-    # 检查连续缺失帧数
-    missing_count = 0
-    # for p in center_points:
-    #     if p is None:
-    #         missing_count += 1
-    #         if missing_count > max_missing:
-    #             return None  # 连续缺失帧数超过阈值，不进行插值
-    #     else:
-    #         missing_count = 0
-
     valid_indices = [i for i, p in enumerate(center_points) if p is not None]
     if not valid_indices:
         return None
@@ -86,17 +56,14 @@ def interpolate_missing_frames(center_points, max_missing=5):
     x_vals = [center_points[i][0] for i in valid_indices]
     y_vals = [center_points[i][1] for i in valid_indices]
 
-    # 线性插值
     x_interp = interp1d(valid_indices, x_vals, kind='linear', fill_value="extrapolate")
     y_interp = interp1d(valid_indices, y_vals, kind='linear', fill_value="extrapolate")
 
-    # 生成插值后的数据
     return [(int(x_interp(i)), int(y_interp(i))) if center_points[i] is None else center_points[i]
             for i in range(len(center_points))]
 
 
 def get_frame_roi(face_landmarks_list, image_width, image_height):
-    """ 计算当前帧人脸关键点的左上角和右下角坐标，以及中心点 """
     all_x, all_y = [], []
 
     for face_landmarks in face_landmarks_list:
@@ -108,21 +75,17 @@ def get_frame_roi(face_landmarks_list, image_width, image_height):
     if not all_x or not all_y:
         return None, None, None
 
-    # 计算左上角和右下角坐标
     x_min, x_max = min(all_x), max(all_x)
     y_min, y_max = min(all_y), max(all_y)
 
-    # 计算中心点（左上角和右下角的平均值）
     center_x = (x_min + x_max) / 2
     center_y = (y_min + y_max) / 2
 
-    # 计算适合包围人脸关键点的正方形尺寸
     face_width = x_max - x_min
     face_height = y_max - y_min
-    side_length = max(face_width, face_height) * 1.5  # 适当扩大
+    side_length = max(face_width, face_height) * 1.5 
 
     return int(center_x), int(center_y), int(side_length)
-
 
 def crop_face_from_video(video_path, output_file, detector):
     cap = cv2.VideoCapture(video_path)
@@ -136,7 +99,6 @@ def crop_face_from_video(video_path, output_file, detector):
     max_side_length = 0
     center_points = []
     all_detection_result = []
-    # 第一遍扫描：获取人脸ROI区域
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -155,15 +117,12 @@ def crop_face_from_video(video_path, output_file, detector):
 
     cap.release()
 
-    # 如果所有帧都未检测到人脸，直接舍弃
     if all(p is None for p in center_points):
         print(f"所有帧都未检测到人脸，舍弃视频: {video_path}")
         return
-
-    # 插值填充丢失的人脸帧
+        
     interpolated_points = interpolate_missing_frames(center_points)
 
-    # 如果插值失败（例如连续缺失帧数 > 5），转向切分视频
     if interpolated_points is None:
         print(f"视频无效: {video_path}")
         return
@@ -174,7 +133,6 @@ def crop_face_from_video(video_path, output_file, detector):
     frame_idx = 0
     out = cv2.VideoWriter(temp_video_path, fourcc, fps, (max_side_length, max_side_length))
 
-    # 生成裁剪后的视频
     while cap.isOpened():
         ret, frame = cap.read()
         if not ret:
@@ -197,7 +155,6 @@ def crop_face_from_video(video_path, output_file, detector):
     if out:
         out.release()
 
-    # 保持原音频
     original_clip = VideoFileClip(video_path)
     processed_clip = VideoFileClip(temp_video_path).set_audio(original_clip.audio)
     processed_clip.write_videofile(output_file, codec='libx264', audio_codec='aac')
@@ -207,7 +164,6 @@ def crop_face_from_video(video_path, output_file, detector):
 
 
 def detect_scenes(video_path, threshold=30):
-    """ 使用 scenedetect 检测视频中的场景变换，并返回时间戳（秒数）。 """
     video_manager = VideoManager([video_path])
     scene_manager = SceneManager()
     scene_manager.add_detector(ContentDetector(threshold=threshold))
@@ -218,9 +174,7 @@ def detect_scenes(video_path, threshold=30):
     scene_list = scene_manager.get_scene_list()
     video_manager.release()
 
-    # 转换时间戳为秒数
     return [(start.get_seconds(), end.get_seconds()) for start, end in scene_list]
-
 
 def process_single_video(input_video_path, output_dir, detector):
     # with semaphore:
@@ -232,19 +186,17 @@ def process_single_video(input_video_path, output_dir, detector):
     scene_list = detect_scenes(input_video_path)
 
     video_clip = VideoFileClip(input_video_path)
-    video_duration = video_clip.duration  # 获取视频总时长
+    video_duration = video_clip.duration 
     if scene_list == []:
         scene_list.append((0, video_duration))
     for i, (start_time, end_time) in enumerate(scene_list):
-        # 确保时间范围在视频时长内
         start_time = min(start_time, video_duration)
         end_time = min(end_time, video_duration)
 
         if start_time >= end_time:
             print(f"跳过无效时间范围: {start_time}-{end_time} 秒")
             continue
-
-        # 切分视频并保存为临时文件
+            
         temp_clip_path = os.path.join(output_dir, f"{video_name}_scene_{i}_temp.mp4")
         clip = video_clip.subclip(start_time, end_time)
         clip.write_videofile(temp_clip_path, codec='libx264', audio_codec='aac')
@@ -264,7 +216,7 @@ def main():
         base_options=base_options,
         output_face_blendshapes=True,
         output_facial_transformation_matrixes=True,
-        num_faces=1
+        num_faces=1            
     )
 
     detector = vision.FaceLandmarker.create_from_options(options)
@@ -275,9 +227,3 @@ def main():
         # p = Process(target=process_single_video, args=(os.path.join(input_folder, file), output_folder, detector))
         # p.start()
         # processes.append(p)
-        try:
-            process_single_video(os.path.join(input_folder, file), output_folder, detector)
-        except Exception as e:
-            print(e)
-
-main()
